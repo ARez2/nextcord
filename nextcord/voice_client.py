@@ -1,6 +1,7 @@
 """
 The MIT License (MIT)
 
+Copyright (c) 2021-present Tag-Epic
 Copyright (c) 2015-present Rapptz
 
 Permission is hereby granted, free of charge, to any person obtaining a
@@ -44,14 +45,18 @@ import socket
 import logging
 import struct
 import threading
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, Tuple
+import select
+import time
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Tuple, Union, Iterable, Mapping
 
 from . import opus, utils
 from .backoff import ExponentialBackoff
 from .gateway import *
-from .errors import ClientException, ConnectionClosed
+from .errors import ClientException, ConnectionClosed, NotConnected, NotListening, AlreadyListening, MissingSink
 from .player import AudioPlayer, AudioSource
+from .types.channel import VoiceChannel, StageChannel
 from .utils import MISSING
+from .sink import Sink, RawData
 
 if TYPE_CHECKING:
     from .client import Client
@@ -220,6 +225,10 @@ class VoiceClient(VoiceProtocol):
         The voice channel connected to.
     loop: :class:`asyncio.AbstractEventLoop`
         The event loop that the voice client is running on.
+    listening_paused: bool
+        If listening is paused
+
+        .. versionadded:: 2.0
     """
     endpoint_ip: str
     voice_port: int
@@ -253,8 +262,16 @@ class VoiceClient(VoiceProtocol):
         self._runner: asyncio.Task = MISSING
         self._player: Optional[AudioPlayer] = None
         self.encoder: Encoder = MISSING
+        self.decoder = None
         self._lite_nonce: int = 0
         self.ws: DiscordVoiceWebSocket = MISSING
+
+        self.listening_paused = False
+        self.listening = False
+        self.user_timestamps = {}
+        self.sink = None
+        self.starting_time = None
+        self.stopping_time = None
 
     warn_nacl = not has_nacl
     supported_modes: Tuple[SupportedModes, ...] = (
@@ -556,6 +573,42 @@ class VoiceClient(VoiceProtocol):
 
         return header + box.encrypt(bytes(data), bytes(nonce)).ciphertext + nonce[:4]
 
+    def _decrypt_xsalsa20_poly1305(self, header, data):
+        box = nacl.secret.SecretBox(bytes(self.secret_key))
+
+        nonce = bytearray(24)
+        nonce[:12] = header
+
+        return self.strip_header_ext(box.decrypt(bytes(data), bytes(nonce)))
+
+    def _decrypt_xsalsa20_poly1305_suffix(self, header, data):
+        box = nacl.secret.SecretBox(bytes(self.secret_key))
+
+        nonce_size = nacl.secret.SecretBox.NONCE_SIZE
+        nonce = data[-nonce_size:]
+
+        return self.strip_header_ext(box.decrypt(bytes(data[:-nonce_size]), nonce))
+
+    def _decrypt_xsalsa20_poly1305_lite(self, header, data):
+        box = nacl.secret.SecretBox(bytes(self.secret_key))
+
+        nonce = bytearray(24)
+        nonce[:4] = data[-4:]
+        data = data[:-4]
+
+        return self.strip_header_ext(box.decrypt(bytes(data), bytes(nonce)))
+
+    @staticmethod
+    def strip_header_ext(data):
+        if data[0] == 0xbe and data[1] == 0xde and len(data) > 4:
+            _, length = struct.unpack_from('>HH', data)
+            offset = 4 + length * 4
+            data = data[offset:]
+        return data
+
+    def get_ssrc(self, user_id):
+        return {info['user_id']: ssrc for ssrc, info in self.ws.ssrc_map.items()}[user_id]
+
     def play(self, source: AudioSource, *, after: Callable[[Optional[Exception]], Any]=None) -> None:
         """Plays an :class:`AudioSource`.
 
@@ -675,3 +728,165 @@ class VoiceClient(VoiceProtocol):
             _log.warning('A packet has been dropped (seq: %s, timestamp: %s)', self.sequence, self.timestamp)
 
         self.checked_add('timestamp', opus.Encoder.SAMPLES_PER_FRAME, 4294967295)
+
+    def _unpack_audio(self, data):
+        if 200 <= data[1] <= 204:
+            # RTCP received.
+            # RTCP provides information about the connection
+            # as opposed to actual audio data, so it's not
+            # important at the moment.
+            return
+        if self.listening_paused:
+            return
+
+        data = RawData(data, self)
+
+        if data.decrypted_data == b'\xf8\xff\xfe':  # Frame of silence
+            data.decrypted_data = None
+
+        self.decoder.decode(data)
+
+    async def start_listening(self, sink, callback, args: Iterable = MISSING,
+                              kwargs: Optional[Mapping[str, Any]] = MISSING):
+        """The bot will begin listening audio from the current voice channel it is in.
+        This function uses a thread so the current code line will not be stopped.
+        Must be in a voice channel to use.
+        Must not be already listening.
+        In order of pausing (writing no sound) simply mute the bot.
+
+
+        .. warning::
+            Recording voice is not offically supported by the discord API. This code might
+            break at any time without warning. It has been developed in good faith,
+            but since discord does not talk about rules for this it is your task to clarify if you are allowed to
+            actually record the channel the bot is in. Please take a look at dev tos!
+
+        .. versionadded:: 2.0
+
+
+        Parameters
+        ----------
+        sink: :class:`Sink`
+            A Sink which will "store" all the audio data.
+        callback: :class:`asynchronous function`
+            A function which is called after the bot has stopped listening.
+        args:
+            Args which will be passed to the callback function.
+        kwargs:
+            Kwargs which will be passed to the callback function.
+        Raises
+        ------
+        NotConnected
+            Not connected to a voice channel.
+        AlreadyListening
+            Already listening.
+        MissingSink
+            Must provide a Sink object.
+        """
+        if args is MISSING:
+            args = []
+        if kwargs is MISSING:
+            kwargs = {}
+        if not self.connected:
+            raise NotConnected('Not connected to voice channel.')
+        if self.listening:
+            raise AlreadyListening("Already listening.")
+        if not isinstance(sink, Sink):
+            raise MissingSink("Must provide a Sink object.")
+
+        await self.channel.guild.change_voice_state(channel=self.channel, self_deaf=False)
+
+        self.empty_socket()
+
+        self.decoder = opus.DecodeManager(self)
+        self.decoder.start()
+        self.listening = True
+        self.sink = sink
+        sink.init(self)
+
+        t = threading.Thread(target=self.recv_audio, args=(callback, *args), kwargs=kwargs)
+        t.start()
+
+    async def stop_listening(self):
+        """|coro|
+
+        Stops the listening.
+        Must be already listening.
+
+        .. versionadded:: 2.0
+
+        Raises
+        ------
+        NotListening
+            Not currently listening.
+        """
+        if not self.listening:
+            raise NotListening("Not currently listening audio.")
+        await self.decoder.stop()
+        self.listening = False
+        self.listening_paused = False
+
+    async def toggle_listening_pause(self):
+        """Pauses or unpauses the listening.
+        Must be already listening.
+        Since currently muting does not work as expected this method should be used
+
+        .. versionadded:: 2.0
+
+        Raises
+        ------
+        NotListening
+            Not currently listening.
+         """
+        if not self.listening:
+            raise NotListening("Not currently listening audio.")
+        self.listening_paused = not self.listening_paused
+
+    def empty_socket(self):
+        while True:
+            ready, _, _ = select.select([self.socket], [], [], 0.0)
+            if not ready:
+                break
+            for s in ready:
+                s.recv(4096)
+
+    def recv_audio(self, callback, *args, **kwargs):
+        self.user_timestamps = {}
+        self.starting_time = time.perf_counter()
+        while self.listening:
+            ready, _, err = select.select([self.socket], [],
+                                          [self.socket], 0.01)
+            if not ready:
+                if err:
+                    print(f"Socket error: {err}")
+                continue
+
+            try:
+                data = self.socket.recv(4096)
+
+            except OSError:
+                asyncio.run(self.stop_listening())
+                continue
+
+            self._unpack_audio(data)
+
+        self.stopping_time = time.perf_counter()
+        self.sink.cleanup()
+        callback = asyncio.run_coroutine_threadsafe(callback(self.sink, *args, **kwargs), self.loop)
+        result = callback.result()
+
+        if result is not None:
+            print(result)
+
+    def recv_decoded_audio(self, data):
+        if data.ssrc not in self.user_timestamps:
+            self.user_timestamps.update({data.ssrc: data.timestamp})
+            silence = 0
+        else:
+            silence = data.timestamp - self.user_timestamps[data.ssrc] - 960
+            self.user_timestamps[data.ssrc] = data.timestamp
+
+        data.decoded_data = struct.pack('<h', 0) * silence * opus._OpusStruct.CHANNELS + data.decoded_data
+        while data.ssrc not in self.ws.ssrc_map:
+            time.sleep(0.05)
+        self.sink.write(data.decoded_data, self.ws.ssrc_map[data.ssrc]['user_id'])
