@@ -56,6 +56,7 @@ packages = [
     'nextcord.ext.application_checks',
     'nextcord.ext.commands',
     'nextcord.ext.tasks',
+    'nextcord.ext.voicerecording',
     
     # Compat
     "discord",
