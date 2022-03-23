@@ -864,8 +864,9 @@ class VoiceClient(VoiceProtocol):
             try:
                 data = self.socket.recv(4096)
 
-            except OSError:
-                print("OS Error. l.868 Stopping listening")
+            #except OSError:
+            except Exception as e:
+                print(f"Exception {e} l.868 Stopping listening")
                 asyncio.run(self.stop_listening())
                 continue
 
