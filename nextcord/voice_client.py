@@ -869,9 +869,7 @@ class VoiceClient(VoiceProtocol):
                 print(f"Exception {e} l.868 Stopping listening")
                 asyncio.run(self.stop_listening())
                 continue
-            print("Start unpack audio")
             self._unpack_audio(data)
-            print("Done unpack audio")
             
         print("Done listening l.875")
         self.stopping_time = time.perf_counter()
