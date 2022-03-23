@@ -60,7 +60,7 @@ class ReconnectWebSocket(Exception):
 class WebSocketClosure(Exception):
     """An exception to make up for the fact that aiohttp doesn't signal closure."""
     def __init__(self):
-	print("WebSocketClosure Exception occured")
+        print("WebSocketClosure Exception occured")
 
 EventListener = namedtuple('EventListener', 'predicate event result future')
 
