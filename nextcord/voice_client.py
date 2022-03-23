@@ -744,7 +744,7 @@ class VoiceClient(VoiceProtocol):
         if data.decrypted_data == b'\xf8\xff\xfe':  # Frame of silence
             data.decrypted_data = None
         
-        print("Decode: ", data)
+        print("Decode: ", data.data, "    ", data.decoded_data)
         self.decoder.decode(data)
 
     async def start_listening(self, sink, callback, args: Iterable = MISSING,
