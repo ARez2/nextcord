@@ -863,8 +863,8 @@ class VoiceClient(VoiceProtocol):
                 continue
 
             try:
-                print(f"Got data: {data}")
                 data = self.socket.recv(4096)
+                print(f"Got data: {data}")
 
             except OSError:
                 asyncio.run(self.stop_listening())
