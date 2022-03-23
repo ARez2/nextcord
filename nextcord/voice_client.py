@@ -854,7 +854,7 @@ class VoiceClient(VoiceProtocol):
         self.user_timestamps = {}
         self.starting_time = time.perf_counter()
         while self.listening:
-            print("While Start")
+            print(f"While Start {self.socket}")
             ready, _, err = select.select([self.socket], [],
                                           [self.socket], 0.01)
             print(f"While Loop {err}")
