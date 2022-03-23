@@ -502,7 +502,7 @@ class DecodeManager(threading.Thread, _OpusStruct):
                 _log.exception("Error occurred decoding opus frame.", exc_info=e)
                 continue
             except Exception as e:
-		print(f"Exception in l.505: {e}")
+                print(f"Exception in l.505: {e}")
 
             self.client.recv_decoded_audio(data)
         self._finished_decoding.set()
