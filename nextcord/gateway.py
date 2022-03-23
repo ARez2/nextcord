@@ -728,7 +728,7 @@ class DiscordVoiceWebSocket:
         self._keep_alive = None
         self._close_code = None
         self.secret_key = None
-		self.ssrc_map = {}
+	self.ssrc_map = {}
         if hook:
             self._hook = hook
 
