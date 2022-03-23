@@ -787,7 +787,7 @@ class VoiceClient(VoiceProtocol):
             args = []
         if kwargs is MISSING:
             kwargs = {}
-        if not self.connected:
+        if not self.is_connected():
             raise NotConnected('Not connected to voice channel.')
         if self.listening:
             raise AlreadyListening("Already listening.")
