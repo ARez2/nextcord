@@ -484,7 +484,6 @@ class DecodeManager(threading.Thread, _OpusStruct):
     def decode(self, opus_frame):
         if not isinstance(opus_frame, RawData):
             raise TypeError("opus_frame should be a RawData object.")
-        print("Got opus frame: ", opus_frame)
         self.decode_queue.append(opus_frame)
 
     def run(self):
@@ -502,6 +501,8 @@ class DecodeManager(threading.Thread, _OpusStruct):
             except OpusError as e:
                 _log.exception("Error occurred decoding opus frame.", exc_info=e)
                 continue
+            except Exception as e:
+		print(f"Exception in l.505: {e}")
 
             self.client.recv_decoded_audio(data)
         self._finished_decoding.set()
