@@ -854,7 +854,6 @@ class VoiceClient(VoiceProtocol):
         self.user_timestamps = {}
         self.starting_time = time.perf_counter()
         while self.listening:
-            print("Listening")
             ready, _, err = select.select([self.socket], [],
                                           [self.socket], 0.01)
             if not ready:
@@ -864,9 +863,9 @@ class VoiceClient(VoiceProtocol):
 
             try:
                 data = self.socket.recv(4096)
-                print(f"Got data: {data}")
 
             except OSError:
+                print("OS Error. l.868 Stopping listening")
                 asyncio.run(self.stop_listening())
                 continue
 
