@@ -484,6 +484,7 @@ class DecodeManager(threading.Thread, _OpusStruct):
     def decode(self, opus_frame):
         if not isinstance(opus_frame, RawData):
             raise TypeError("opus_frame should be a RawData object.")
+	print("Got opus frame: ", opus_frame)
         self.decode_queue.append(opus_frame)
 
     def run(self):
