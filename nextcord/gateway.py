@@ -839,7 +839,7 @@ class DiscordVoiceWebSocket:
             interval = data['heartbeat_interval'] / 1000.0
             self._keep_alive = VoiceKeepAliveHandler(ws=self, interval=min(interval, 5.0))
             self._keep_alive.start()
-		elif op == self.SPEAKING:
+        elif op == self.SPEAKING:
             ssrc = data['ssrc']
             speaking = data['speaking']
             if ssrc in self.ssrc_map:
