@@ -793,17 +793,23 @@ class VoiceClient(VoiceProtocol):
             raise AlreadyListening("Already listening.")
         if not isinstance(sink, Sink):
             raise MissingSink("Must provide a Sink object.")
-
+        
+        print("Voice Client.py: Change voice state l.797")
         await self.channel.guild.change_voice_state(channel=self.channel, self_deaf=False)
-
+        
+        print("Voice Client.py: Empty socket l.800")
         self.empty_socket()
-
+        
+        print("Voice Client.py: Init Decoder l.803")
         self.decoder = opus.DecodeManager(self)
+        print("Voice Client.py: Start Decoder l. 805")
         self.decoder.start()
         self.listening = True
         self.sink = sink
+        print("Voice Client.py: Init Sink l.809")
         sink.init(self)
-
+        
+        print("Voice Client.py: Start thread 'recv_audio' l. 812")
         t = threading.Thread(target=self.recv_audio, args=(callback, *args), kwargs=kwargs)
         t.start()
 
