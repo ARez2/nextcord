@@ -794,22 +794,16 @@ class VoiceClient(VoiceProtocol):
         if not isinstance(sink, Sink):
             raise MissingSink("Must provide a Sink object.")
         
-        print("Voice Client.py: Change voice state l.797")
         await self.channel.guild.change_voice_state(channel=self.channel, self_deaf=False)
         
-        print("Voice Client.py: Empty socket l.800")
         self.empty_socket()
         
-        print("Voice Client.py: Init Decoder l.803")
         self.decoder = opus.DecodeManager(self)
-        print("Voice Client.py: Start Decoder l. 805")
         self.decoder.start()
         self.listening = True
         self.sink = sink
-        print("Voice Client.py: Init Sink l.809")
         sink.init(self)
         
-        print("Voice Client.py: Start thread 'recv_audio' l. 812")
         t = threading.Thread(target=self.recv_audio, args=(callback, *args), kwargs=kwargs)
         t.start()
 
@@ -860,6 +854,7 @@ class VoiceClient(VoiceProtocol):
         self.user_timestamps = {}
         self.starting_time = time.perf_counter()
         while self.listening:
+            print("Listening")
             ready, _, err = select.select([self.socket], [],
                                           [self.socket], 0.01)
             if not ready:
@@ -868,6 +863,7 @@ class VoiceClient(VoiceProtocol):
                 continue
 
             try:
+                print(f"Got data: {data}")
                 data = self.socket.recv(4096)
 
             except OSError:
@@ -875,11 +871,14 @@ class VoiceClient(VoiceProtocol):
                 continue
 
             self._unpack_audio(data)
-
+            
+        print("Done listening l.875")
         self.stopping_time = time.perf_counter()
         self.sink.cleanup()
+        print("Run threadsafe l.875")
         callback = asyncio.run_coroutine_threadsafe(callback(self.sink, *args, **kwargs), self.loop)
         result = callback.result()
+        print(f"Got a result: {result}")
 
         if result is not None:
             print(result)
