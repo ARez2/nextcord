@@ -855,8 +855,10 @@ class VoiceClient(VoiceProtocol):
         self.starting_time = time.perf_counter()
         while self.listening:
             print(f"While Start {self.socket}")
-            ready, _, err = select.select([self.socket], [],
-                                          [self.socket], 0.01)
+            try:
+                ready, _, err = select.select([self.socket], [], [self.socket], 0.01)
+            except Exception as e:
+                print(f"Exception on select: {e}")
             print(f"While Loop {err}")
             if not ready:
                 if err:
